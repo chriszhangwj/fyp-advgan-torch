@@ -22,8 +22,8 @@ def weights_init(m):
 class AdvGAN_Attack:
     def __init__(self,
                  device,
-                 model,
-                 model_num_labels,
+                 model, # target model
+                 model_num_labels, # 10 for MNIST
                  image_nc,
                  box_min,
                  box_max):
@@ -46,66 +46,69 @@ class AdvGAN_Attack:
 
         # initialize optimizers
         self.optimizer_G = torch.optim.Adam(self.netG.parameters(),
-                                            lr=0.001)
+                                            lr=0.001) # original value 0.001
         self.optimizer_D = torch.optim.Adam(self.netDisc.parameters(),
-                                            lr=0.001)
+                                            lr=0.0001) # original value 0.001
 
         if not os.path.exists(models_path):
             os.makedirs(models_path)
 
     def train_batch(self, x, labels):
-        # optimize D
+        # Train Discriminator
         for i in range(1):
-            perturbation = self.netG(x)
+            perturbation = self.netG(x) # get a perturbation from Generator
 
             # add a clipping trick
-            adv_images = torch.clamp(perturbation, -0.3, 0.3) + x
-            adv_images = torch.clamp(adv_images, self.box_min, self.box_max)
+            adv_images = torch.clamp(perturbation, -0.3, 0.3) + x # clip perturbation to [-0.3,-0.3]
+            adv_images = torch.clamp(adv_images, self.box_min, self.box_max) # clip perturbed images to [0,1]
 
             self.optimizer_D.zero_grad()
-            pred_real = self.netDisc(x)
-            loss_D_real = F.mse_loss(pred_real, torch.ones_like(pred_real, device=self.device))
+            pred_real = self.netDisc(x) # predicted probilities for real images from Discriminator
+            loss_D_real = F.mse_loss(pred_real, torch.ones_like(pred_real, device=self.device)) # MSE loss of real images for Discriminator (prediction vs ground-truth label of 1)
             loss_D_real.backward()
 
-            pred_fake = self.netDisc(adv_images.detach())
-            loss_D_fake = F.mse_loss(pred_fake, torch.zeros_like(pred_fake, device=self.device))
+            pred_fake = self.netDisc(adv_images.detach()) # predicted probabilities for perturbed images from Discriminator
+            loss_D_fake = F.mse_loss(pred_fake, torch.zeros_like(pred_fake, device=self.device)) # MSE loss of perturbed images for Discriminator (prediction vs ground-truth label of 0)
             loss_D_fake.backward()
-            loss_D_GAN = loss_D_fake + loss_D_real
+            loss_D_GAN = loss_D_fake + loss_D_real # Discriminator loss
             self.optimizer_D.step()
 
-        # optimize G
-        for i in range(1):
+        # Train Generator
+        for i in range(5):
             self.optimizer_G.zero_grad()
 
-            # cal G's loss in GAN
-            pred_fake = self.netDisc(adv_images)
-            loss_G_fake = F.mse_loss(pred_fake, torch.ones_like(pred_fake, device=self.device))
-            loss_G_fake.backward(retain_graph=True)
+            # Generator loss
+            pred_fake = self.netDisc(adv_images) # predicted probabilities for perturbed images from Discriminator
+            loss_G_fake = F.mse_loss(pred_fake, torch.ones_like(pred_fake, device=self.device)) # MSE loss for perturbed images for Generator (prediction vs ground-truth label of one) (we want the discriminator to predict one despite the ground-truth is in fact zero)
+            #loss_G_fake.backward(retain_graph=True)
 
             # perturbation loss
-            C = 0.3
+            c = 0.3 # soft hinge constant
             loss_perturb = torch.mean(torch.norm(perturbation.view(perturbation.shape[0], -1), 2, dim=1))
+            # loss_perturb = torch.mean(torch.max(torch.norm(perturbation.view(perturbation.shape[0], -1), 2, dim=1)-c,0)) # soft hinge loss on L2 norm
 
-            # adv loss
-            logits_model = self.model(adv_images)
-            probs_model = F.softmax(logits_model, dim=1)
+            # adversarial loss (C&W)
+            logits_model = self.model(adv_images) # logits for perturebd images from target model
+            probs_model = F.softmax(logits_model, dim=1) # convert logits to probabilities with softmax
             onehot_labels = torch.eye(self.model_num_labels, device=self.device)[labels]
-
-            # C&W loss function
             real = torch.sum(onehot_labels * probs_model, dim=1)
             other, _ = torch.max((1 - onehot_labels) * probs_model - onehot_labels * 10000, dim=1)
             zeros = torch.zeros_like(other)
-            loss_adv = torch.max(real - other, zeros)
+            loss_adv = torch.max(real - other, zeros) # if untargeted
             loss_adv = torch.sum(loss_adv)
 
             # maximize cross_entropy loss
             # loss_adv = -F.mse_loss(logits_model, onehot_labels)
             # loss_adv = - F.cross_entropy(logits_model, labels)
 
-            adv_lambda = 10
-            pert_lambda = 1
-            loss_G = adv_lambda * loss_adv + pert_lambda * loss_perturb
-            loss_G.backward()
+            # adv_lambda = 10 # original parameters
+            # pert_lambda = 1 # original parameters
+            # loss_G = adv_lambda * loss_adv + pert_lambda * loss_perturb # original parameters
+            
+            alpha=1.0
+            beta=5.0
+            loss_G =  loss_adv + alpha*loss_G_fake + beta*loss_perturb
+            loss_G.backward(retain_graph=True)
             self.optimizer_G.step()
 
         return loss_D_GAN.item(), loss_G_fake.item(), loss_perturb.item(), loss_adv.item()
@@ -117,7 +120,7 @@ class AdvGAN_Attack:
                 self.optimizer_G = torch.optim.Adam(self.netG.parameters(),
                                                     lr=0.0001)
                 self.optimizer_D = torch.optim.Adam(self.netDisc.parameters(),
-                                                    lr=0.0001)
+                                                    lr=0.00001) # original value 0.0001
             if epoch == 80:
                 self.optimizer_G = torch.optim.Adam(self.netG.parameters(),
                                                     lr=0.00001)
@@ -141,7 +144,7 @@ class AdvGAN_Attack:
 
             # print statistics
             num_batch = len(train_dataloader)
-            print("epoch %d:\nloss_D: %.3f, loss_G_fake: %.3f,\
+            print("epoch %d:\nloss_D: %.3f, loss_G: %.3f,\
              \nloss_perturb: %.3f, loss_adv: %.3f, \n" %
                   (epoch, loss_D_sum/num_batch, loss_G_fake_sum/num_batch,
                    loss_perturb_sum/num_batch, loss_adv_sum/num_batch))

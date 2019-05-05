@@ -7,7 +7,7 @@ from models import Target_C
 
 use_cuda=True
 image_nc=1
-epochs = 60
+epochs = 40 # original value 60
 batch_size = 128
 BOX_MIN = 0
 BOX_MAX = 1

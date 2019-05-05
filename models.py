@@ -1,10 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Target Model 
-
-
-# Target Model definition
 class Target_C(nn.Module): # targeted model
     def __init__(self):
         super(Target_C, self).__init__()
@@ -26,7 +22,7 @@ class Target_C(nn.Module): # targeted model
         x = F.max_pool2d(x, 2)
         x = x.view(-1, 64*4*4) # reshape input into a row vector of 64*4*4
         x = F.relu(self.fc1(x))
-        #x = F.dropout(x, 0.5)
+        x = F.dropout(x, 0.5)
         x = F.relu(self.fc2(x))
         x = self.logits(x)
         return x
@@ -74,7 +70,7 @@ class Discriminator(nn.Module):
         self.model = nn.Sequential(*model)
 
     def forward(self, x):
-        output = self.model(x).squeeze()
+        output = self.model(x).squeeze() # squeeze removes all dimensions of dim 1 but keeping the remainder dimension and structure unchanged
         return output
 
 
@@ -97,7 +93,7 @@ class Generator(nn.Module):
             # 16*12*12
             nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=0, bias=True),
             nn.InstanceNorm2d(32),
-            nn.ReLU(), # d32
+            nn.ReLU() # d32
             # 32*5*5
         ]
 
@@ -115,8 +111,9 @@ class Generator(nn.Module):
             nn.InstanceNorm2d(8),
             nn.ReLU(), # u8
             # state size. 8 x 23 x 23
-            #nn.ConvTranspose2d(8, image_nc, kernel_size=6, stride=1, padding=0, bias=False), # image_nc: image channel number is 1
-            nn.ConvTranspose2d(8, image_nc, kernel_size=3, stride=1, padding=0, bias=False), # according to paper
+            #nn.ConvTranspose2d(8, image_nc, kernel_size=6, stride=1, padding=0, bias=False), # 
+            nn.ConvTranspose2d(8, image_nc, kernel_size=6, stride=1, padding=0, bias=False), # image_nc: image channel number is 1;
+            # according to paper, kernel size should be 3*3 but require 6 to restore 28*28 from 23*23 
             nn.Tanh()
             # state size. image_nc x 28 x 28
         ]
